@@ -1,0 +1,36 @@
+# Gradle build outputs and cache
+.gradle/
+build/
+*/build/
+
+# Android SDK and local developer configurations
+local.properties
+.cxx/
+*.apk
+*.aab
+
+# Kotlin / Konan compiler cache
+.kotlin/
+.konan/
+
+# macOS files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+
+# IDE & Editor files
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# Xcode & Apple builds
+DerivedData/
+*.xcuserstate
+*.xcuserdatad
+*.xcscmblueprint
