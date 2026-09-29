@@ -2,9 +2,9 @@ name: Build Multiplatform Artifacts
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
   workflow_dispatch:
 
 jobs:
@@ -41,6 +41,7 @@ jobs:
           ./scripts/build-artifacts.sh
 
       - name: Upload Android AAR
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
           name: blescanner-android-aar
@@ -48,6 +49,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload iOS XCFramework
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
           name: blescanner-ios-xcframework
