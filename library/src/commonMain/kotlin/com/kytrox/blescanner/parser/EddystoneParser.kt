@@ -2,10 +2,12 @@ package com.kytrox.blescanner.parser
 
 import com.kytrox.blescanner.domain.BleSignal
 
-private const val EDDYSTONE_SERVICE_UUID = "0000feaa-0000-1000-8000-00805f9b34fb"
-private const val FRAME_TYPE_UID: Int = 0x00
-private const val FRAME_TYPE_URL: Int = 0x10
-private const val FRAME_TYPE_TLM: Int = 0x20
+private const val EDDYSTONE_UUID_16BIT = 0xFEAA
+private const val UUID_16_BYTE_LENGTH = 2
+private const val MIN_SERVICE_DATA_LENGTH = 3
+private const val FRAME_TYPE_UID = 0x00
+private const val FRAME_TYPE_URL = 0x10
+private const val FRAME_TYPE_TLM = 0x20
 
 private const val UID_NAMESPACE_OFFSET = 2
 private const val UID_NAMESPACE_LENGTH = 10
@@ -27,29 +29,39 @@ private const val TLM_UPTIME_DIVISOR = 10.0f
 private const val FRAME_TYPE_MASK = 0xF0
 private const val BYTE_MASK = 0xFF
 private const val FIXED_POINT_SHIFT = 8
+private const val SHIFT_24_BITS = 24
+private const val SHIFT_16_BITS = 16
+private const val SHIFT_8_BITS = 8
 
 /**
- * Parses Eddystone beacon advertisements from service data.
- *
- * Detection: service data with UUID 0xFEAA.
- * Dispatches by frame type byte to UID, URL, or TLM.
+ * Parses Eddystone beacon advertisements from raw 16-bit Service Data (0x16)
+ * byte arrays stored in [RawAdvertisement.serviceData16Bit].
  */
 internal object EddystoneParser {
 
     internal fun parse(raw: RawAdvertisement): BleSignal.Eddystone? {
-        val serviceBytes = findEddystoneData(raw) ?: return null
-        if (serviceBytes.isEmpty()) return null
-        return parseFrame(serviceBytes, raw)
+        val frameBytes = findEddystoneFrameBytes(raw) ?: return null
+        if (frameBytes.isEmpty()) return null
+        return parseFrame(frameBytes, raw)
     }
 
-    private fun findEddystoneData(raw: RawAdvertisement): ByteArray? {
-        return raw.serviceData[EDDYSTONE_SERVICE_UUID]
+    private fun findEddystoneFrameBytes(raw: RawAdvertisement): ByteArray? {
+        for (entry in raw.serviceData16Bit) {
+            if (isEddystoneEntry(entry)) {
+                return entry.copyOfRange(UUID_16_BYTE_LENGTH, entry.size)
+            }
+        }
+        return null
     }
 
-    private fun parseFrame(
-        data: ByteArray,
-        raw: RawAdvertisement,
-    ): BleSignal.Eddystone? {
+    private fun isEddystoneEntry(entry: ByteArray): Boolean {
+        if (entry.size < MIN_SERVICE_DATA_LENGTH) return false
+        val uuidLittleEndian = entry.readUInt16LE(0)
+        val uuidBigEndian = entry.readUInt16BE(0)
+        return uuidLittleEndian == EDDYSTONE_UUID_16BIT || uuidBigEndian == EDDYSTONE_UUID_16BIT
+    }
+
+    private fun parseFrame(data: ByteArray, raw: RawAdvertisement): BleSignal.Eddystone? {
         val frameType = data[0].toInt() and FRAME_TYPE_MASK
         return when (frameType) {
             FRAME_TYPE_UID -> parseUid(data, raw)
@@ -59,61 +71,42 @@ internal object EddystoneParser {
         }
     }
 
-    private fun parseUid(
-        data: ByteArray,
-        raw: RawAdvertisement,
-    ): BleSignal.Eddystone.Uid? {
+    private fun parseUid(data: ByteArray, raw: RawAdvertisement): BleSignal.Eddystone.Uid? {
         if (data.size < UID_MIN_LENGTH) return null
-        val txPower = data.readInt8(1)
-        val namespace = data.copyOfRange(UID_NAMESPACE_OFFSET, UID_NAMESPACE_OFFSET + UID_NAMESPACE_LENGTH).toHexString()
-        val instance = data.copyOfRange(UID_INSTANCE_OFFSET, UID_INSTANCE_OFFSET + UID_INSTANCE_LENGTH).toHexString()
-
         return BleSignal.Eddystone.Uid(
-            txPower = txPower,
-            namespace = namespace,
-            instance = instance,
+            txPower = data.readInt8(1),
+            namespace = sliceHex(data, UID_NAMESPACE_OFFSET, UID_NAMESPACE_LENGTH),
+            instance = sliceHex(data, UID_INSTANCE_OFFSET, UID_INSTANCE_LENGTH),
             rssi = raw.rssi,
             deviceAddress = raw.deviceAddress,
             timestampMillis = raw.timestampMillis,
         )
     }
 
-    private fun parseUrl(
-        data: ByteArray,
-        raw: RawAdvertisement,
-    ): BleSignal.Eddystone.Url? {
+    private fun sliceHex(data: ByteArray, offset: Int, length: Int): String {
+        return data.copyOfRange(offset, offset + length).toHexString()
+    }
+
+    private fun parseUrl(data: ByteArray, raw: RawAdvertisement): BleSignal.Eddystone.Url? {
         if (data.size < URL_MIN_LENGTH) return null
-        val txPower = data.readInt8(1)
         val urlBytes = data.copyOfRange(URL_SCHEME_OFFSET, data.size)
-        val url = EddystoneUrlDecoder.decodeUrl(urlBytes)
-
         return BleSignal.Eddystone.Url(
-            txPower = txPower,
-            url = url,
+            txPower = data.readInt8(1),
+            url = EddystoneUrlDecoder.decodeUrl(urlBytes),
             rssi = raw.rssi,
             deviceAddress = raw.deviceAddress,
             timestampMillis = raw.timestampMillis,
         )
     }
 
-    private fun parseTlm(
-        data: ByteArray,
-        raw: RawAdvertisement,
-    ): BleSignal.Eddystone.Tlm? {
+    private fun parseTlm(data: ByteArray, raw: RawAdvertisement): BleSignal.Eddystone.Tlm? {
         if (data.size < TLM_MIN_LENGTH) return null
-
-        val version = data[TLM_VERSION_OFFSET].toInt() and BYTE_MASK
-        val battery = data.readUInt16BE(TLM_BATTERY_OFFSET)
-        val temperature = decodeTemperature(data)
-        val advCount = readUInt32BE(data, TLM_ADV_COUNT_OFFSET)
-        val uptime = readUInt32BE(data, TLM_UPTIME_OFFSET) / TLM_UPTIME_DIVISOR
-
         return BleSignal.Eddystone.Tlm(
-            version = version,
-            batteryMilliVolts = battery,
-            temperatureCelsius = temperature,
-            advertisementCount = advCount,
-            uptimeSeconds = uptime,
+            version = data[TLM_VERSION_OFFSET].toInt() and BYTE_MASK,
+            batteryMilliVolts = data.readUInt16BE(TLM_BATTERY_OFFSET),
+            temperatureCelsius = decodeTemperature(data),
+            advertisementCount = readUInt32BE(data, TLM_ADV_COUNT_OFFSET),
+            uptimeSeconds = readUInt32BE(data, TLM_UPTIME_OFFSET) / TLM_UPTIME_DIVISOR,
             rssi = raw.rssi,
             deviceAddress = raw.deviceAddress,
             timestampMillis = raw.timestampMillis,
@@ -128,9 +121,10 @@ internal object EddystoneParser {
     }
 
     private fun readUInt32BE(data: ByteArray, offset: Int): Long {
-        return ((data[offset].toLong() and 0xFF) shl 24) or
-            ((data[offset + 1].toLong() and 0xFF) shl 16) or
-            ((data[offset + 2].toLong() and 0xFF) shl 8) or
-            (data[offset + 3].toLong() and 0xFF)
+        val b0 = (data[offset].toLong() and BYTE_MASK.toLong()) shl SHIFT_24_BITS
+        val b1 = (data[offset + 1].toLong() and BYTE_MASK.toLong()) shl SHIFT_16_BITS
+        val b2 = (data[offset + 2].toLong() and BYTE_MASK.toLong()) shl SHIFT_8_BITS
+        val b3 = data[offset + 3].toLong() and BYTE_MASK.toLong()
+        return b0 or b1 or b2 or b3
     }
 }

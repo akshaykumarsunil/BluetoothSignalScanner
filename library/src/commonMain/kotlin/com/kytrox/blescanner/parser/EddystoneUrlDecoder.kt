@@ -1,5 +1,7 @@
 package com.kytrox.blescanner.parser
 
+private const val BYTE_MASK = 0xFF
+
 /**
  * Decodes Eddystone-URL scheme bytes and HTTP expansion codes.
  *
@@ -37,27 +39,26 @@ internal object EddystoneUrlDecoder {
 
     internal fun decodeUrl(schemeAndEncodedBytes: ByteArray): String {
         if (schemeAndEncodedBytes.isEmpty()) return ""
-
-        val schemeByte = schemeAndEncodedBytes[0].toInt() and 0xFF
-        val scheme = decodeScheme(schemeByte)
-
+        val schemeByte = schemeAndEncodedBytes[0].toInt() and BYTE_MASK
         return buildString {
-            append(scheme)
+            append(decodeScheme(schemeByte))
             appendEncodedCharacters(schemeAndEncodedBytes)
         }
     }
 
-    private fun StringBuilder.appendEncodedCharacters(
-        bytes: ByteArray,
-    ) {
-        for (i in 1 until bytes.size) {
-            val code = bytes[i].toInt() and 0xFF
-            val suffix = URL_SUFFIXES[code]
-            if (suffix != null) {
-                append(suffix)
-            } else {
-                append(code.toChar())
-            }
+    private fun StringBuilder.appendEncodedCharacters(bytes: ByteArray) {
+        for (index in 1 until bytes.size) {
+            val code = bytes[index].toInt() and BYTE_MASK
+            appendDecodedByte(code)
         }
+    }
+
+    private fun StringBuilder.appendDecodedByte(code: Int) {
+        val suffix = URL_SUFFIXES[code]
+        if (suffix != null) {
+            append(suffix)
+            return
+        }
+        append(code.toChar())
     }
 }

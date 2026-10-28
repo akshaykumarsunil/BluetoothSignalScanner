@@ -1,10 +1,16 @@
 package com.kytrox.blescanner.scanner
 
+import com.kytrox.blescanner.domain.AdType
 import com.kytrox.blescanner.domain.BleSignal
 import com.kytrox.blescanner.parser.AdvertisementParser
 import com.kytrox.blescanner.parser.RawAdvertisement
+import com.kytrox.blescanner.parser.RawAdvertisementParser
+import com.kytrox.blescanner.parser.hexToByteArray
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.alloc
+import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.ptr
 import kotlinx.cinterop.usePinned
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -21,15 +27,15 @@ import platform.CoreBluetooth.CBUUID
 import platform.Foundation.NSData
 import platform.Foundation.NSNumber
 import platform.darwin.NSObject
-import kotlin.coroutines.resume
-import kotlinx.cinterop.alloc
-import kotlinx.cinterop.memScoped
-import kotlinx.cinterop.ptr
 import platform.posix.gettimeofday
+import platform.posix.memcpy
 import platform.posix.timeval
+import kotlin.coroutines.resume
 
 private const val MILLIS_PER_SECOND = 1000L
-private const val BYTE_MASK = 0xFF
+private const val TYPE_HEADER_SIZE = 1
+private const val SHORT_UUID_BYTE_SIZE = 2
+private const val UUID_32_BYTE_SIZE = 4
 
 /**
  * iOS BLE scanner using [CBCentralManager].
@@ -96,65 +102,97 @@ private class ScanDelegate(
         advertisementData: Map<Any?, *>,
         rssi: NSNumber,
     ): RawAdvertisement {
-        return RawAdvertisement(
+        val rawBytes = serializeAdvertisementData(advertisementData)
+        return RawAdvertisementParser.parse(
             deviceAddress = peripheral.identifier.UUIDString,
             rssi = rssi.intValue,
             timestampMillis = currentTimeMillis(),
-            deviceName = extractDeviceName(advertisementData),
-            txPowerLevel = extractTxPowerLevel(advertisementData),
-            serviceUuids = extractServiceUuids(advertisementData),
-            serviceData = extractServiceData(advertisementData),
-            manufacturerData = extractManufacturerData(advertisementData),
-            flags = null,
-            appearance = null,
+            rawBytes = rawBytes,
         )
     }
 
-    private fun extractDeviceName(data: Map<Any?, *>): String? {
-        return data[CBAdvertisementDataLocalNameKey] as? String
+    private fun serializeAdvertisementData(data: Map<Any?, *>): ByteArray {
+        val buffer = mutableListOf<Byte>()
+        appendLocalName(data, buffer)
+        appendTxPower(data, buffer)
+        appendServiceUuids(data, buffer)
+        appendServiceData(data, buffer)
+        appendManufacturerData(data, buffer)
+        return buffer.toByteArray()
     }
 
-    private fun extractTxPowerLevel(data: Map<Any?, *>): Int? {
-        return (data[CBAdvertisementDataTxPowerLevelKey] as? NSNumber)?.intValue
+    private fun appendLocalName(data: Map<Any?, *>, buffer: MutableList<Byte>) {
+        val name = data[CBAdvertisementDataLocalNameKey] as? String ?: return
+        appendStructure(AdType.COMPLETE_LOCAL_NAME.code, name.encodeToByteArray(), buffer)
     }
 
-    private fun extractServiceUuids(data: Map<Any?, *>): List<String> {
-        val uuids = data[CBAdvertisementDataServiceUUIDsKey] as? List<*> ?: return emptyList()
-        return uuids.mapNotNull { (it as? CBUUID)?.UUIDString?.lowercase() }
-            .map { expandShortUuid(it) }
+    private fun appendTxPower(data: Map<Any?, *>, buffer: MutableList<Byte>) {
+        val level = (data[CBAdvertisementDataTxPowerLevelKey] as? NSNumber)?.intValue ?: return
+        appendStructure(AdType.TX_POWER_LEVEL.code, byteArrayOf(level.toByte()), buffer)
     }
 
-    private fun expandShortUuid(uuid: String): String {
-        if (uuid.length <= 8) {
-            return "0000${uuid.padStart(4, '0')}-0000-1000-8000-00805f9b34fb"
-        }
-        return uuid
-    }
-
-    @OptIn(ExperimentalForeignApi::class)
-    private fun extractServiceData(data: Map<Any?, *>): Map<String, ByteArray> {
-        val serviceDataMap = data[CBAdvertisementDataServiceDataKey] as? Map<*, *> ?: return emptyMap()
-        return buildMap {
-            for ((key, value) in serviceDataMap) {
-                val uuid = (key as? CBUUID)?.UUIDString?.lowercase() ?: continue
-                val nsData = value as? NSData ?: continue
-                put(expandShortUuid(uuid), nsData.toByteArray())
-            }
+    private fun appendServiceUuids(data: Map<Any?, *>, buffer: MutableList<Byte>) {
+        val uuids = data[CBAdvertisementDataServiceUUIDsKey] as? List<*> ?: return
+        for (item in uuids) {
+            val uuidHex = (item as? CBUUID)?.UUIDString ?: continue
+            appendSingleUuid(uuidHex.hexToByteArray(), buffer)
         }
     }
 
-    @OptIn(ExperimentalForeignApi::class)
-    private fun extractManufacturerData(data: Map<Any?, *>): Map<Int, ByteArray> {
-        val nsData = data[CBAdvertisementDataManufacturerDataKey] as? NSData ?: return emptyMap()
+    private fun appendSingleUuid(uuidBytes: ByteArray, buffer: MutableList<Byte>) {
+        if (uuidBytes.size == SHORT_UUID_BYTE_SIZE) {
+            appendStructure(AdType.COMPLETE_SERVICE_UUIDS_16_BIT.code, uuidBytes.reversedArray(), buffer)
+            return
+        }
+        if (uuidBytes.size == UUID_32_BYTE_SIZE) {
+            appendStructure(AdType.COMPLETE_SERVICE_UUIDS_32_BIT.code, uuidBytes.reversedArray(), buffer)
+            return
+        }
+        appendStructure(AdType.COMPLETE_SERVICE_UUIDS_128_BIT.code, uuidBytes, buffer)
+    }
+
+    private fun appendServiceData(data: Map<Any?, *>, buffer: MutableList<Byte>) {
+        val map = data[CBAdvertisementDataServiceDataKey] as? Map<*, *> ?: return
+        for ((key, value) in map) {
+            val uuidHex = (key as? CBUUID)?.UUIDString ?: continue
+            val payload = (value as? NSData)?.toByteArray() ?: continue
+            appendSingleServiceData(uuidHex.hexToByteArray(), payload, buffer)
+        }
+    }
+
+    private fun appendSingleServiceData(
+        uuidBytes: ByteArray,
+        payload: ByteArray,
+        buffer: MutableList<Byte>,
+    ) {
+        if (uuidBytes.size == SHORT_UUID_BYTE_SIZE) {
+            appendStructure(AdType.SERVICE_DATA_16_BIT.code, uuidBytes.reversedArray() + payload, buffer)
+            return
+        }
+        if (uuidBytes.size == UUID_32_BYTE_SIZE) {
+            appendStructure(AdType.SERVICE_DATA_32_BIT.code, uuidBytes.reversedArray() + payload, buffer)
+            return
+        }
+        appendStructure(AdType.SERVICE_DATA_128_BIT.code, uuidBytes + payload, buffer)
+    }
+
+    private fun appendManufacturerData(data: Map<Any?, *>, buffer: MutableList<Byte>) {
+        val nsData = data[CBAdvertisementDataManufacturerDataKey] as? NSData ?: return
         val bytes = nsData.toByteArray()
-        if (bytes.size < 2) return emptyMap()
+        if (bytes.isEmpty()) return
+        appendStructure(AdType.MANUFACTURER_SPECIFIC_DATA.code, bytes, buffer)
+    }
 
-        // First 2 bytes are company ID (little-endian)
-        val companyId = (bytes[0].toInt() and BYTE_MASK) or
-            ((bytes[1].toInt() and BYTE_MASK) shl 8)
-        val payload = bytes.copyOfRange(2, bytes.size)
-
-        return mapOf(companyId to payload)
+    private fun appendStructure(
+        typeCode: Int,
+        payload: ByteArray,
+        buffer: MutableList<Byte>,
+    ) {
+        buffer.add((payload.size + TYPE_HEADER_SIZE).toByte())
+        buffer.add(typeCode.toByte())
+        for (byte in payload) {
+            buffer.add(byte)
+        }
     }
 
     @OptIn(ExperimentalForeignApi::class)
@@ -171,8 +209,7 @@ private fun NSData.toByteArray(): ByteArray {
     if (length == 0) return ByteArray(0)
     val bytes = ByteArray(length)
     bytes.usePinned { pinned ->
-        platform.posix.memcpy(pinned.addressOf(0), this.bytes, this.length)
+        memcpy(pinned.addressOf(0), this.bytes, this.length)
     }
     return bytes
 }
-

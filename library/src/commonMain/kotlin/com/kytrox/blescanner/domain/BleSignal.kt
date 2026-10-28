@@ -67,7 +67,7 @@ public sealed interface BleSignal {
 
     /**
      * Standard Bluetooth SIG GAP advertisement.
-     * All fields are parsed to human-readable formats.
+     * All fields are parsed from raw AD structures into human-readable formats.
      */
     public data class Sig(
         val deviceName: String?,
@@ -80,5 +80,18 @@ public sealed interface BleSignal {
         override val rssi: Int,
         override val deviceAddress: String,
         override val timestampMillis: Long,
+        val shortenedLocalName: String? = null,
+        val completeLocalName: String? = null,
+        val serviceSolicitationUuids: List<String> = emptyList(),
+        val uris: List<String> = emptyList(),
+        val classOfDevice: String? = null,
+        val leRole: String? = null,
+        val leBluetoothDeviceAddress: String? = null,
+        val publicTargetAddresses: List<String> = emptyList(),
+        val randomTargetAddresses: List<String> = emptyList(),
+        val advertisingInterval: String? = null,
+        val peripheralConnectionIntervalRange: String? = null,
+        val broadcastName: String? = null,
+        val adStructures: Map<AdType, List<String>> = emptyMap(),
     ) : BleSignal
 }
