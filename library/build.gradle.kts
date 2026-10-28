@@ -11,7 +11,7 @@ version = "0.1.0"
 
 kotlin {
     explicitApi()
-    jvmToolchain(17)
+    jvmToolchain(25)
 
     // ---- Android ----
     android {
