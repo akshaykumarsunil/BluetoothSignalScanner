@@ -194,10 +194,12 @@ Before upgrading SKIE or Kotlin:
 ## Sibling Consumer App Integration (Flutter / Android / iOS)
 
 When a sibling Flutter or Android app resides in the same repository and consumes `:library` directly via module encapsulation:
-1. **Share the Version Catalog**: Reference `../../gradle/libs.versions.toml` in the consumer app's `settings.gradle.kts` (`versionCatalogs { create("libs") { from(files("../../gradle/libs.versions.toml")) } }`) so Kotlin, Coroutines, Datetime, and other shared libraries use the exact same latest stable versions.
-2. **Align Gradle & JDK Toolchain**:
+1. **Share the Version Catalog & KMP Module**:
+   - Reference `../../gradle/libs.versions.toml` in the consumer app's `settings.gradle.kts` (`versionCatalogs { create("libs") { from(files("../../gradle/libs.versions.toml")) } }`) so AGP, Kotlin, SKIE, Coroutines, and Datetime use the exact same latest stable versions.
+   - Include the KMP module directly via `include(":library")` and `project(":library").projectDir = file("../../library")`.
+2. **Align Gradle, AGP & JDK Toolchain**:
    - Upgrade the consumer app's `gradle-wrapper.properties` to match the KMP project's latest stable Gradle distribution.
-   - Set `kotlin { jvmToolchain(<latest-stable-jdk>) }` in both `:app` and `:library` so neither project falls back to an older Java version.
-   - If the consumer framework's Android Gradle plugin bundles a D8 dexer with a lower maximum bytecode class version than the latest JDK toolchain, keep `jvmToolchain(<latest-stable-jdk>)` and set `compilerOptions { jvmTarget.set(...) }` / `compileOptions` to the highest bytecode target supported by that D8 dexer.
+   - Set `kotlin { jvmToolchain(<latest-stable-jdk>) }` and `JavaVersion` in both `:app` and `:library`.
+   - When using Flutter's `dev.flutter.flutter-gradle-plugin` with AGP 9+, add `android.newDsl=false` and `android.builtInKotlin=false` in `android/gradle.properties`, and include `android/app/proguard-rules.pro` for R8 release minification.
 3. **Dart / Flutter Package Versions**:
    - Always resolve and use the latest stable versions of all `pubspec.yaml` dependencies and lint packages compatible with the installed Flutter/Dart SDK.
