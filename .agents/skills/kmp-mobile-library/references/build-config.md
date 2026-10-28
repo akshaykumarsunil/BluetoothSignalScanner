@@ -1,28 +1,42 @@
 # Build configuration templates
 
 Templates for an Android + iOS KMP library using the Android-KMP library plugin.
-**Every version below is a placeholder.** Look up current stable versions and check the compatibility tables before use (see rule 3 in SKILL.md).
+**Always resolve and use the latest stable build versions** for the JDK, Gradle wrapper, Kotlin, AGP, SKIE, and all libraries/plugins, and verify their compatibility tables before use (see rule 3 in [SKILL.md](../SKILL.md)).
 
 Contents:
-- Version catalog
+- Gradle wrapper (`gradle-wrapper.properties`)
+- Version catalog (`gradle/libs.versions.toml`)
 - `settings.gradle.kts`
 - Root `build.gradle.kts`
 - `gradle.properties`
 - Library module `build.gradle.kts`
-- Notes on the Android block
+- Notes on the Android block & JDK alignment
 - Optional: SKIE
+- Sibling Consumer App Integration (Flutter / Android / iOS)
+
+## Gradle wrapper: `gradle/wrapper/gradle-wrapper.properties`
+
+```properties
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-<latest-stable-gradle-version>-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+```
 
 ## Version catalog: `gradle/libs.versions.toml`
 
 ```toml
 [versions]
-kotlin = "<latest stable Kotlin>"
-agp = "<latest stable AGP, must be 8.10 or newer for this plugin>"
-coroutines = "<latest>"
-serialization = "<latest>"
-datetime = "<latest>"
-ktor = "<latest>"
-# skie = "<latest SKIE that supports the chosen Kotlin version>"
+agp = "<latest stable AGP version>"
+kotlin = "<latest stable Kotlin version>"
+coroutines = "<latest stable kotlinx-coroutines version>"
+serialization = "<latest stable kotlinx-serialization version>"
+datetime = "<latest stable kotlinx-datetime version>"
+ktor = "<latest stable Ktor version>"
+skie = "<latest stable SKIE version compatible with Kotlin>"
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -38,13 +52,13 @@ ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "kto
 ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
 
 [plugins]
-kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 androidKmpLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
-# skie = { id = "co.touchlab.skie", version.ref = "skie" }
+skie = { id = "co.touchlab.skie", version.ref = "skie" }
 ```
 
-Only include the libraries the library really needs. Remove the Ktor and serialization lines for a pure-logic library.
+Only include the libraries the module really needs. Remove the Ktor and serialization lines for a pure-logic or hardware-scanner library.
 
 ## `settings.gradle.kts`
 
@@ -75,7 +89,7 @@ include(":library")
 plugins {
     alias(libs.plugins.kotlinMultiplatform) apply false
     alias(libs.plugins.androidKmpLibrary) apply false
-    alias(libs.plugins.kotlinSerialization) apply false
+    alias(libs.plugins.skie) apply false
 }
 ```
 
@@ -99,8 +113,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidKmpLibrary)
-    alias(libs.plugins.kotlinSerialization)   // remove if unused
-    // alias(libs.plugins.skie)               // optional, see below
+    alias(libs.plugins.skie)
 }
 
 group = "com.example"
@@ -108,12 +121,13 @@ version = "0.1.0"
 
 kotlin {
     explicitApi()
+    jvmToolchain(/* <latest stable JDK version> */)
 
     // ---- Android ----
     android {
         namespace = "com.example.mylib"
-        compileSdk = 36        // use the latest stable API level
-        minSdk = 24
+        compileSdk = /* <latest stable Android API level> */
+        minSdk = /* <minimum supported Android API level> */
 
         // Opt in: the new plugin disables tests by default.
         withHostTest { }
@@ -138,42 +152,28 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.datetime)
-            implementation(libs.ktor.client.core)
-            implementation(libs.ktor.client.content.negotiation)
-            implementation(libs.ktor.serialization.kotlinx.json)
             // Use api(...) instead of implementation(...) for anything that appears in the public API.
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
-            implementation(libs.ktor.client.mock)
-        }
-        androidMain.dependencies {
-            implementation(libs.ktor.client.okhttp)
-        }
-        iosMain.dependencies {
-            implementation(libs.ktor.client.darwin)
         }
     }
 }
 ```
 
-## Notes on the Android block
+## Notes on the Android block & JDK alignment
 
-- Inside `kotlin { }` the block is called `android { }` for AGP 8.12 and newer. Older AGP versions (below 8.12) use `androidLibrary { }`. `androidLibrary { }` is deprecated in newer AGP.
-- There is no top-level `android { }` extension, no build types and no product flavours. The plugin produces a single variant.
+- Inside `kotlin { }` the block is called `android { }` for modern AGP releases (`com.android.kotlin.multiplatform.library`). Older AGP versions used `androidLibrary { }`, which is deprecated.
+- Always configure the **latest stable JDK version** via `kotlin { jvmToolchain(...) }` across both the KMP library and any sibling consumer applications so both projects compile with the exact same Java toolchain.
+- There is no top-level `android { }` extension, no build types and no product flavours in the KMP module. The plugin produces a single variant.
 - Source set names are `androidMain`, `androidHostTest` and `androidDeviceTest`. Move any old `src/main`, `src/test` and `src/androidTest` content there.
 - Opt-in features:
   - Android resources: `androidResources { enable = true }` (files go in `src/androidMain/res`).
   - Java sources: `withJava()`.
   - Consumer keep rules: `optimization { consumerKeepRules.apply { publish = true; file("consumer-rules.pro") } }`.
 - Not supported: BuildConfig (use a generator such as BuildKonfig), data binding and view binding, `externalNativeBuild`. If native C/C++ or variants are essential, put them in a separate `com.android.library` module and depend on it from `androidMain`.
-- Set the JVM target with `kotlin { jvmToolchain(17) }` (or a newer LTS) for a consistent baseline, or per target inside `android { compilerOptions { jvmTarget.set(...) } }`.
-- To add a tooling-only dependency (such as Compose preview tooling) without publishing it, use `dependencies { "androidRuntimeClasspath"(...) }`.
-
-If the exact DSL differs from the above, trust the current docs: developer.android.com/kotlin/multiplatform/plugin.
 
 ## Optional: SKIE (nicer Swift API)
 
@@ -187,8 +187,17 @@ skie {
 }
 ```
 
-Before adding SKIE:
-1. Read skie.touchlab.co/intro and confirm the chosen Kotlin version is supported.
-2. If not, either pick a Kotlin version SKIE supports or skip SKIE and use the wrapper approach in `ios-interop.md`.
+Before upgrading SKIE or Kotlin:
+1. Confirm the latest stable Kotlin version and latest stable SKIE version are compatible.
+2. Note that SKIE generates `.apinotes` that restore Swift keywords stripped with trailing underscores in Objective-C headers (e.g. `namespace_` in Objective-C is accessed as `.namespace` in Swift).
 
-JetBrains also publishes agent skills for related build tasks, for example an AGP 9 migration skill in the `Kotlin/kotlin-agent-skills` GitHub repository. They can be used alongside this skill.
+## Sibling Consumer App Integration (Flutter / Android / iOS)
+
+When a sibling Flutter or Android app resides in the same repository and consumes `:library` directly via module encapsulation:
+1. **Share the Version Catalog**: Reference `../../gradle/libs.versions.toml` in the consumer app's `settings.gradle.kts` (`versionCatalogs { create("libs") { from(files("../../gradle/libs.versions.toml")) } }`) so Kotlin, Coroutines, Datetime, and other shared libraries use the exact same latest stable versions.
+2. **Align Gradle & JDK Toolchain**:
+   - Upgrade the consumer app's `gradle-wrapper.properties` to match the KMP project's latest stable Gradle distribution.
+   - Set `kotlin { jvmToolchain(<latest-stable-jdk>) }` in both `:app` and `:library` so neither project falls back to an older Java version.
+   - If the consumer framework's Android Gradle plugin bundles a D8 dexer with a lower maximum bytecode class version than the latest JDK toolchain, keep `jvmToolchain(<latest-stable-jdk>)` and set `compilerOptions { jvmTarget.set(...) }` / `compileOptions` to the highest bytecode target supported by that D8 dexer.
+3. **Dart / Flutter Package Versions**:
+   - Always resolve and use the latest stable versions of all `pubspec.yaml` dependencies and lint packages compatible with the installed Flutter/Dart SDK.

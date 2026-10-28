@@ -1,11 +1,10 @@
 package com.kytrox.blescanner.scanner
 
 /**
- * iOS actual: no parameters needed — CoreBluetooth does not
- * require an application context.
+ * Creates an iOS [BleScanner] backed by CoreBluetooth [platform.CoreBluetooth.CBCentralManager].
  */
-public actual class BleScannerFactory {
-    public actual fun create(): BleScanner {
+public class BleScannerFactory {
+    public fun create(): BleScanner {
         return IosBleScanner()
     }
 }

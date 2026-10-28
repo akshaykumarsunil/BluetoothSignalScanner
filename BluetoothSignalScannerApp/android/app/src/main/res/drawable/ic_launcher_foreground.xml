@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Inner BLE Signal Waves -->
+    <path
+        android:pathData="M71.5,41.5 A21.5,21.5 0 0,1 71.5,66.5"
+        android:strokeColor="#D990CAF9"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M36.5,66.5 A21.5,21.5 0 0,1 36.5,41.5"
+        android:strokeColor="#D990CAF9"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round" />
+
+    <!-- Outer BLE Signal Waves -->
+    <path
+        android:pathData="M77.5,36.5 A29.0,29.0 0 0,1 77.5,71.5"
+        android:strokeColor="#7A90CAF9"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M30.5,71.5 A29.0,29.0 0 0,1 30.5,36.5"
+        android:strokeColor="#7A90CAF9"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round" />
+
+    <!-- Central Bluetooth Rune (#F4F7FC) -->
+    <path
+        android:pathData="M42,64.5 L66,43.5 L54,32 L54,76 L66,64.5 L42,43.5"
+        android:strokeColor="#FFF4F7FC"
+        android:strokeWidth="4.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>
+

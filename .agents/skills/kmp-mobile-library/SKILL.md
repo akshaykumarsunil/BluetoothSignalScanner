@@ -11,7 +11,7 @@ Build a reusable **library** (not an app) whose shared code runs on Android and 
 
 1. **Targets: Android and iOS only.** Declare `android`, `iosArm64` and `iosSimulatorArm64`. Do not add `jvm()`, desktop, `js`, `wasmJs`, `mingwX64`, `linux*` or `macos*`, even "just for tests". If the user asks for one, say it is outside this skill and confirm before adding it. Leave out `iosX64` (Intel simulator) unless the user needs it: Apple Silicon is the norm and Intel-Mac support is being phased out. Check the current Kotlin target-support docs if unsure.
 2. **Use the Android-KMP library plugin**, `com.android.kotlin.multiplatform.library`, with a `kotlin { android { ... } }` block. Do not use `com.android.library` plus `androidTarget()` in new code. On AGP 9+ that route needs an opt-in to deprecated APIs and is expected to be removed in AGP 10. Never apply `com.android.application` or `org.jetbrains.kotlin.android` in the library module.
-3. **Look up versions, never recall them.** Kotlin, AGP, Gradle, SKIE, Ktor and coroutines change often, and a wrong pin gives confusing build errors. Check kotlinlang.org/docs/releases.html, developer.android.com/build/releases/gradle-plugin and Maven Central / the Gradle plugin portal. Also check the compatibility tables (Kotlin, Gradle, AGP, JDK, Xcode). If you cannot browse, leave clearly marked placeholders and tell the user which versions to fill in.
+3. **Always use the latest stable build versions.** Never hardcode outdated versions or recall them from memory. Look up and use the **latest stable build version** for the JDK (`jvmToolchain`), Gradle wrapper, Kotlin, Android Gradle Plugin (AGP), SKIE, `kotlinx-coroutines`, `kotlinx-datetime`, `kotlinx-serialization`, `ktor`, Android `compileSdk`, and CI GitHub Actions. When adding a sibling consumer app (e.g. Android or Flutter), ensure both the KMP library and the consumer app use the **exact same latest stable JDK version (`jvmToolchain`)**, the **latest stable Gradle wrapper**, the **latest stable framework/plugin packages**, and a shared `gradle/libs.versions.toml` catalog. Always verify compatibility tables (Kotlin, Gradle, AGP, JDK, SKIE, Xcode) before pinning versions.
 4. **Logic lives in `commonMain`.** Use `androidMain` / `iosMain` only where a platform API is genuinely needed, behind an interface or `expect/actual`.
 5. **Small, deliberate public API.** Turn on `explicitApi()` and keep everything `internal` unless consumers need it. Swift sees Kotlin through an Objective-C bridge, so every public type has a cost.
 6. **Be honest about verification.** iOS targets only compile on macOS with Xcode. If you could not run a step (iOS build, tests, publish), say so in the final summary instead of implying it works.
@@ -24,7 +24,7 @@ If the user or the existing repo already answers a question, do not ask it again
 
 - What does the library do, and roughly what is the public API?
 - Who consumes it: native Swift + Kotlin apps, or KMP apps? This decides how to distribute it (step 7).
-- Minimum Android SDK and minimum iOS version. Defaults if the user has no preference: minSdk 24, iOS 15.
+- Minimum Android SDK and minimum iOS version. Use the latest stable `compileSdk` and sensible modern minimum versions if the user has no preference.
 - Group ID, base package, and library name (the library name also becomes the iOS framework name).
 - Capabilities needed: networking, storage, crypto, serialization, and so on.
 - Is a Mac available for iOS builds and CI?

@@ -3,12 +3,12 @@ package com.kytrox.blescanner.scanner
 import android.content.Context
 
 /**
- * Android actual: requires [Context] for accessing BluetoothManager.
+ * Creates an Android [BleScanner] backed by [android.bluetooth.le.BluetoothLeScanner].
  */
-public actual class BleScannerFactory(
+public class BleScannerFactory(
     private val context: Context,
 ) {
-    public actual fun create(): BleScanner {
+    public fun create(): BleScanner {
         return AndroidBleScanner(context)
     }
 }

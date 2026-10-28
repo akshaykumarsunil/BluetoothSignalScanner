@@ -4,22 +4,23 @@ Contents:
 - Choosing a distribution route
 - Maven (Kotlin, KMP and Android consumers)
 - XCFramework + Swift Package Manager (Swift consumers)
-- GitHub Actions example
+- GitHub Actions example (Latest Stable JDK + Multi-Artifact CI)
 - Versioning and release checklist
 
 ## Choosing a distribution route
 
 | Consumer | Route |
 |---|---|
-| Android app (Kotlin/Gradle) | Maven artifact (the Android target publishes an AAR) |
+| Android app (Kotlin/Gradle) | Direct `:library` module dependency (in-repo) or Maven artifact (`.aar`) |
 | KMP app (Android + iOS) | Maven artifact, same coordinates. Gradle picks the right target. |
-| Native iOS app (Swift, Xcode) | XCFramework in a Swift package |
+| Native iOS app (Swift, Xcode) | Direct `XCFramework` symlink + build phase (in-repo) or Swift Package Manager binary target |
+| Flutter app (Android + iOS) | Encapsulated `:library` Gradle subproject on Android + Podspec `s.script_phase` & `s.vendored_frameworks` symlink on iOS |
 
-Many libraries need both: Maven for Android/KMP consumers and an XCFramework for Swift-only apps.
+Many repositories build and publish both the KMP library artifacts (`.aar` and `.xcframework`) and the consumer app artifacts (`.apk` and `.app`).
 
 ## Maven
 
-The Kotlin Gradle plugin creates one publication per target plus a root publication that carries the metadata. Consumers depend on the root coordinates only. With the Android-KMP plugin there are no Android-specific publishing steps beyond the standard KMP setup (see kotlinlang.org/docs/multiplatform/multiplatform-publish-lib-setup.html).
+The Kotlin Gradle plugin creates one publication per target plus a root publication that carries the metadata. Consumers depend on the root coordinates only. With the Android-KMP plugin (`com.android.kotlin.multiplatform.library`) there are no Android-specific publishing steps beyond the standard KMP setup (see kotlinlang.org/docs/multiplatform/multiplatform-publish-lib-setup.html).
 
 Two common routes:
 
@@ -28,11 +29,11 @@ Two common routes:
 
 ```kotlin
 plugins {
-    alias(libs.plugins.mavenPublish)   // add to the catalog after looking up the version
+    alias(libs.plugins.mavenPublish)   // add the latest stable version to the catalog
 }
 
 mavenPublishing {
-    publishToMavenCentral()            // check the plugin docs: this API has changed between versions
+    publishToMavenCentral()
     signAllPublications()
     coordinates("com.example", "mylib", "0.1.0")
     pom {
@@ -52,19 +53,19 @@ Publishing the Apple targets requires macOS. Publish from a macOS runner so the 
 
 ## XCFramework + Swift Package Manager
 
-1. Build (on macOS): `./gradlew :library:assembleMyLibXCFramework`. Use `./gradlew tasks --group=build` to see the exact task name. Output is in `library/build/XCFrameworks/release/MyLib.xcframework`.
+1. Build (on macOS): `./gradlew :library:assembleMyLibReleaseXCFramework`. Use `./gradlew tasks --group=build` to see the exact task name. Output is in `library/build/XCFrameworks/release/MyLib.xcframework`.
 2. Zip it: `cd library/build/XCFrameworks/release && zip -r MyLib.xcframework.zip MyLib.xcframework`.
 3. Checksum: `swift package compute-checksum MyLib.xcframework.zip`.
 4. Upload the zip to a stable direct-download URL, for example a GitHub Release asset.
-5. Write `Package.swift` in a Git repository (ideally separate from the Kotlin code, so the Swift and Kotlin versions can differ):
+5. Write `Package.swift` in a Git repository (ideally separate from the Kotlin code, so the Swift and Kotlin versions can differ), using the latest stable `swift-tools-version` and target platform version:
 
 ```swift
-// swift-tools-version:5.9
+// swift-tools-version:<latest-stable-swift-tools-version>
 import PackageDescription
 
 let package = Package(
     name: "MyLib",
-    platforms: [.iOS(.v15)],
+    platforms: [.iOS(/* <minimum supported iOS version> */)],
     products: [.library(name: "MyLib", targets: ["MyLib"])],
     targets: [
         .binaryTarget(
@@ -79,54 +80,101 @@ let package = Package(
 6. Validate: `swift package reset && swift package show-dependencies --format json`.
 7. Push and tag the repository with the semantic version. Swift Package Manager versions come from Git tags.
 
-Newer Kotlin releases can generate a `Package.swift` next to the XCFramework when the project consumes SwiftPM dependencies. Check the current docs (kotlinlang.org/docs/multiplatform/multiplatform-spm-export.html) before relying on it, and set `.iOS(...)` to match your real minimum version.
+## GitHub Actions example (Latest Stable JDK + Multi-Artifact CI)
 
-## GitHub Actions example
-
-Two jobs. Android checks run on Linux (cheaper); iOS work needs macOS. Check for newer major versions of each action before using.
+Always use the **latest stable JDK version** (matching `jvmToolchain` in Gradle) and the **latest stable major versions** of all GitHub Actions:
 
 ```yaml
-name: CI
+name: Build Multiplatform Artifacts & Flutter App
+
 on:
-  push: { branches: [main] }
+  push:
+    branches: [ main, develop ]
   pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
 
 jobs:
-  android:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: 17 }   # match your Gradle/AGP requirement
-      - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew :library:testAndroidHostTest          # confirm the task name with ./gradlew tasks
-
-  ios:
+  build:
+    name: Build KMP & Flutter Artifacts
     runs-on: macos-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: 17 }
-      - uses: gradle/actions/setup-gradle@v4
-      - uses: actions/cache@v4
+      - name: Checkout repository
+        uses: actions/checkout@<latest-stable-major-version>
+
+      - name: Set up latest stable JDK
+        uses: actions/setup-java@<latest-stable-major-version>
         with:
-          path: ~/.konan
-          key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
-      - run: ./gradlew :library:iosSimulatorArm64Test
-      - run: ./gradlew :library:assembleMyLibXCFramework
+          distribution: 'temurin'
+          java-version: '<latest-stable-jdk-version>'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@<latest-stable-major-version>
+        with:
+          packages: 'platform-tools'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@<latest-stable-major-version>
+        with:
+          channel: 'stable'
+
+      - name: Run KMP Library Unit Tests
+        run: ./gradlew :library:allTests
+
+      - name: Analyze & Test Consumer App
+        working-directory: BluetoothSignalScannerApp
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
+      - name: Build All 4 Artifacts (KMP AAR, KMP XCFramework, Flutter APK, Flutter iOS App)
+        run: ./scripts/build-artifacts.sh
+
+      - name: Upload 1/4 — KMP Android AAR
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@<latest-stable-major-version>
+        with:
+          name: blescanner-kmp-android-aar
+          path: library/build/outputs/aar/*.aar
+          if-no-files-found: error
+
+      - name: Upload 2/4 — KMP iOS XCFramework
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@<latest-stable-major-version>
+        with:
+          name: blescanner-kmp-ios-xcframework
+          path: library/build/XCFrameworks/release/BleSignalScanner.xcframework
+          if-no-files-found: error
+
+      - name: Upload 3/4 — Flutter Android APK
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@<latest-stable-major-version>
+        with:
+          name: blescanner-flutter-android-apk
+          path: BluetoothSignalScannerApp/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+      - name: Upload 4/4 — Flutter iOS App (.app)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@<latest-stable-major-version>
+        with:
+          name: blescanner-flutter-ios-app
+          path: BluetoothSignalScannerApp/build/ios/iphoneos/Runner.app
+          if-no-files-found: error
 ```
 
 Notes:
-- macOS runners are slower and more expensive than Linux ones. Keep the iOS job lean and run it on pull requests only if the budget allows.
-- The Xcode version on the runner must be compatible with your Kotlin version. If builds start failing after a runner image update, check the Kotlin/Xcode compatibility table.
-- Cache `~/.konan` (Kotlin/Native toolchain) to avoid a large download on every run.
+- Both the KMP library and any sibling consumer app must compile under the **same latest stable JDK version** and **latest stable Gradle version**.
+- The Xcode version on the macOS runner must be compatible with the chosen latest stable Kotlin version.
+- Optionally cache `~/.konan` (Kotlin/Native toolchain) using the latest stable `actions/cache` version to speed up repeated builds.
 
 ## Versioning and release checklist
 
 1. Version numbers follow semver. A change to the public API that breaks Swift or Kotlin callers is a major bump.
 2. Run the API/ABI check and read the diff.
 3. Update the changelog.
-4. Run all tests on macOS (Android + iOS).
-5. Publish to Maven from macOS. Build, zip and upload the XCFramework.
-6. Update `Package.swift` (URL and checksum), then tag the release.
-7. Confirm from a clean sample project: one Gradle dependency, one Swift package.
+4. Run all tests on macOS (Android + iOS + consumer app tests).
+5. Build or publish all release artifacts (`.aar`, `.xcframework`, `.apk`, `.app`).
+6. Update `Package.swift` (URL and checksum) if distributing via SwiftPM, then tag the release.
